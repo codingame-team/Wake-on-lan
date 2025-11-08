@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Démarrage GameArena...</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='wol_styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 GameArena</h1>
+        <div class="status" id="status">Réveil du serveur en cours...</div>
+        <div class="spinner" id="spinner"></div>
+        <div class="progress">
+            <div class="progress-bar" id="progress"></div>
+        </div>
+        <div class="log" id="log"></div>
+    </div>
+    
+    <script>
+        const mac = "{{ mac }}";
+        const ip = "{{ ip }}";
+        const gameArenaUrl = "{{ url }}";
+        const maxWaitTime = {{ max_wait }};
+        let startTime = Date.now();
+        let progressInterval;
+        
+        function addLog(message) {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString('fr-FR');
+            entry.textContent = '[' + time + '] ' + message;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        function updateProgress() {
+            const elapsed = (Date.now() - startTime) / 1000;
+            const progress = Math.min((elapsed / maxWaitTime) * 100, 100);
+            document.getElementById('progress').style.width = progress + '%';
+        }
+        
+        function showError(message) {
+            document.getElementById('spinner').style.display = 'none';
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = '';
+            
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'alert error';
+            errorDiv.textContent = '❌ ' + message;
+            statusDiv.appendChild(errorDiv);
+            
+            const br1 = document.createElement('br');
+            const br2 = document.createElement('br');
+            errorDiv.appendChild(br1);
+            errorDiv.appendChild(br2);
+            
+            const link = document.createElement('a');
+            link.href = '/';
+            link.className = 'btn';
+            link.textContent = 'Retour a la page principale';
+            errorDiv.appendChild(link);
+            
+            clearInterval(progressInterval);
+        }
+        
+        async function sendWOL() {
+            addLog('Envoi du paquet Wake-on-LAN...');
+            
+            try {
+                const response = await fetch('/api/wol', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mac: mac, ip: ip })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addLog('Paquet WOL envoye avec succes');
+                    addLog('Attente du demarrage de ' + ip + '...');
+                    waitForOnline();
+                } else {
+                    showError('Echec de envoi du paquet WOL: ' + (data.error || 'Erreur inconnue'));
+                }
+            } catch (error) {
+                showError('Erreur reseau: ' + error.message);
+            }
+        }
+        
+        async function waitForOnline(attempt) {
+            if (typeof attempt === 'undefined') attempt = 0;
+            if (attempt >= maxWaitTime) {
+                showError('Timeout: Le serveur n a pas demarre apres ' + maxWaitTime + ' secondes');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/ping/' + ip);
+                const data = await response.json();
+                
+                if (data.online) {
+                    clearInterval(progressInterval);
+                    document.getElementById('progress').style.width = '100%';
+                    addLog('Serveur accessible apres ' + attempt + ' secondes');
+                    document.getElementById('status').textContent = 'Serveur demarre! Redirection...';
+                    
+                    setTimeout(function() {
+                        window.location.href = gameArenaUrl;
+                    }, 1000);
+                    return;
+                }
+            } catch (error) {
+                // Continue a attendre
+            }
+            
+            if (attempt % 10 === 0 && attempt > 0) {
+                addLog('Attente... (' + attempt + 's ecoulees)');
+            }
+            
+            setTimeout(function() { waitForOnline(attempt + 1); }, 1000);
+        }
+        
+        // Demarrer le processus
+        progressInterval = setInterval(updateProgress, 1000);
+        sendWOL();
+    </script>
+</body>
+</html>
