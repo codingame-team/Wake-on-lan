@@ -30,7 +30,7 @@ app.secret_key = app_secret  # changez via .env ou variable d'environnement
 
 # Configuration
 FREEBOX_URL = "http://mafreebox.freebox.fr"
-CONFIG_FILE = ".freebox_token"
+CONFIG_FILE = os.path.join(BASE_DIR, ".freebox_token")  # Chemin absolu pour le token
 GAMEARENA_URL = "http://philippe.mourey.com:60001"
 GAMEARENA_HOST_IP = "192.168.1.100"  # IP de la machine GameArena
 MAX_WAIT_TIME = 120  # Temps d'attente max en secondes
