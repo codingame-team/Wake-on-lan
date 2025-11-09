@@ -32,7 +32,7 @@ app.secret_key = app_secret  # changez via .env ou variable d'environnement
 # Pour PythonAnywhere, définissez FREEBOX_IP dans les variables d'environnement.
 # Pour le local, l'accès se fait via le nom de domaine mafreebox.freebox.fr.
 freebox_host = os.environ.get('FREEBOX_IP', 'mafreebox.freebox.fr')
-FREEBOX_URL = f"http://{freebox_host}"
+FREEBOX_URL = f"http://{freebox_host}:57999"
 
 CONFIG_FILE = os.path.join(BASE_DIR, ".freebox_token")  # Chemin absolu pour le token
 GAMEARENA_URL = "http://philippe.mourey.com:60001"
@@ -99,10 +99,10 @@ def send_wol(session_token, mac_address):
     url = f"{FREEBOX_URL}/api/v8/lan/wol/pub/"
     headers = {"X-Fbx-App-Auth": session_token}
     payload = {"mac": mac_address}
-    
+
     response = requests.post(url, json=payload, headers=headers)
     data = response.json()
-    
+
     return data.get("success", False)
 
 def ping_host(host, timeout=1):
@@ -233,34 +233,34 @@ def debug_info():
 
     return jsonify(debug_data)
 
-# if __name__ == '__main__':
-#     print("🏠 Wake-on-LAN Web Interface")
-#     print("="*60)
-#     print("📝 Configuration:")
-#     # Afficher les chemins utilisés pour les templates et static pour faciliter le debug
-#     print(f"Templates dir: {TEMPLATE_DIR}")
-#     print(f"Static dir: {STATIC_DIR}")
-#
-#     config = load_config()
-#     if config:
-#         print(f"   ✅ Freebox token: {config['app_token'][:20]}...")
-#     else:
-#         print("   ❌ Pas de token trouvé. Exécutez: python3 freebox_auth.py")
-#
-#     print(f"\n📡 Machines configurées: {len(MACHINES)}")
-#     for machine_id, machine in MACHINES.items():
-#         print(f"   - {machine['name']}")
-#         print(f"     MAC: {machine['mac']}")
-#         print(f"     IP: {machine['ip']}")
-#
-#     secret_key_status = "✅" if app_secret != 'your-secret-key-change-this' else "❌"
-#     print(f"\n🔑 Clé secrète chargée: {secret_key_status} (modifiez via .env ou variable d'environnement)")
-#
-#     print("\n🌐 Interface web disponible sur:")
-#     print("   http://localhost:5001")
-#     print("   http://127.0.0.1:5001")
-#     print("\n⚠️  IMPORTANT: Modifiez les adresses MAC dans MACHINES en haut du fichier")
-#     print("\nAppuyez sur Ctrl+C pour arrêter")
-#     print("="*60)
-#
-#     app.run(host='0.0.0.0', port=5001, debug=True)
+if __name__ == '__main__':
+    print("🏠 Wake-on-LAN Web Interface")
+    print("="*60)
+    print("📝 Configuration:")
+    # Afficher les chemins utilisés pour les templates et static pour faciliter le debug
+    print(f"Templates dir: {TEMPLATE_DIR}")
+    print(f"Static dir: {STATIC_DIR}")
+
+    config = load_config()
+    if config:
+        print(f"   ✅ Freebox token: {config['app_token'][:20]}...")
+    else:
+        print("   ❌ Pas de token trouvé. Exécutez: python3 freebox_auth.py")
+
+    print(f"\n📡 Machines configurées: {len(MACHINES)}")
+    for machine_id, machine in MACHINES.items():
+        print(f"   - {machine['name']}")
+        print(f"     MAC: {machine['mac']}")
+        print(f"     IP: {machine['ip']}")
+
+    secret_key_status = "✅" if app_secret != 'your-secret-key-change-this' else "❌"
+    print(f"\n🔑 Clé secrète chargée: {secret_key_status} (modifiez via .env ou variable d'environnement)")
+
+    print("\n🌐 Interface web disponible sur:")
+    print("   http://localhost:5001")
+    print("   http://127.0.0.1:5001")
+    print("\n⚠️  IMPORTANT: Modifiez les adresses MAC dans MACHINES en haut du fichier")
+    print("\nAppuyez sur Ctrl+C pour arrêter")
+    print("="*60)
+
+    app.run(host='0.0.0.0', port=5001, debug=True)

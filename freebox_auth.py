@@ -2,14 +2,17 @@ import requests
 import json
 import time
 import sys
+import os
 
-FREEBOX_URL = "http://mafreebox.freebox.fr"
+# Définir dynamiquement l'hôte Freebox : utilise la variable d'environnement FREEBOX_IP si fournie (utile sur PythonAnywhere)
+freebox_host = os.environ.get('FREEBOX_IP', 'mafreebox.freebox.fr')
+FREEBOX_URL = f"http://{freebox_host}"
 APP_ID = "fr.gamearena.deploy"
 
 def request_authorization():
     """Demander l'autorisation à la Freebox"""
     url = f"{FREEBOX_URL}/api/v8/login/authorize/"
-    
+
     app_info = {
         "app_id": APP_ID,
         "app_name": "GameArena Deploy",
@@ -26,7 +29,7 @@ def request_authorization():
     print("📡 Demande d'autorisation à la Freebox...")
     response = requests.post(url, json=app_info)
     data = response.json()
-    
+
     if not data.get("success"):
         print(f"❌ Erreur: {data}")
         sys.exit(1)
@@ -51,19 +54,19 @@ def request_authorization():
 def check_authorization_status(track_id):
     """Vérifier si l'autorisation a été accordée"""
     url = f"{FREEBOX_URL}/api/v8/login/authorize/{track_id}"
-    
+
     for i in range(60):  # 60 tentatives = 60 secondes
         time.sleep(1)
         
         try:
             response = requests.get(url)
             data = response.json()
-            
+
             if not data.get("success"):
                 continue
-            
+
             status = data["result"]["status"]
-            
+
             if status == "granted":
                 print("\n✅ AUTORISATION ACCORDÉE!")
                 return True
@@ -84,17 +87,20 @@ def check_authorization_status(track_id):
     return False
 
 def save_token(app_token):
-    """Sauvegarder le token dans un fichier"""
+    """Sauvegarder le token dans un fichier (chemin absolu dans le même dossier que le script)."""
     config = {
         "app_id": "fr.gamearena.deploy",
         "app_token": app_token,
         "freebox_url": FREEBOX_URL
     }
-    
-    with open(".freebox_token", "w") as f:
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    token_file = os.path.join(base_dir, ".freebox_token")
+
+    with open(token_file, "w") as f:
         json.dump(config, f, indent=2)
-    
-    print(f"\n💾 Token sauvegardé dans .freebox_token")
+
+    print(f"\n💾 Token sauvegardé dans {token_file}")
     print("\n⚠️  IMPORTANT: Ajoutez .freebox_token au .gitignore!")
 
 if __name__ == "__main__":
