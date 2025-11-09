@@ -207,6 +207,28 @@ def gamearena_redirect():
                          url=GAMEARENA_URL,
                          max_wait=MAX_WAIT_TIME)
 
+@app.route('/debug')
+def debug_info():
+    """Route de débogage pour vérifier les chemins et la configuration."""
+    debug_data = {
+        "base_dir": BASE_DIR,
+        "config_file_path": CONFIG_FILE,
+        "config_file_exists": os.path.exists(CONFIG_FILE),
+        "working_directory": os.getcwd()
+    }
+
+    config_content = "File not found or could not be read."
+    if debug_data["config_file_exists"]:
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                config_content = f.read()
+        except Exception as e:
+            config_content = f"Error reading file: {str(e)}"
+
+    debug_data["config_content"] = config_content
+
+    return jsonify(debug_data)
+
 # if __name__ == '__main__':
 #     print("🏠 Wake-on-LAN Web Interface")
 #     print("="*60)
