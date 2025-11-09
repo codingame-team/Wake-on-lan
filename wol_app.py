@@ -29,7 +29,11 @@ app_secret = os.environ.get('SECRET_KEY') or os.environ.get('FLASK_SECRET') or '
 app.secret_key = app_secret  # changez via .env ou variable d'environnement
 
 # Configuration
-FREEBOX_URL = "http://mafreebox.freebox.fr"
+# Pour PythonAnywhere, définissez FREEBOX_IP dans les variables d'environnement.
+# Pour le local, l'accès se fait via le nom de domaine mafreebox.freebox.fr.
+freebox_host = os.environ.get('FREEBOX_IP', 'mafreebox.freebox.fr')
+FREEBOX_URL = f"http://{freebox_host}"
+
 CONFIG_FILE = os.path.join(BASE_DIR, ".freebox_token")  # Chemin absolu pour le token
 GAMEARENA_URL = "http://philippe.mourey.com:60001"
 GAMEARENA_HOST_IP = "192.168.1.100"  # IP de la machine GameArena
