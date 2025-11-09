@@ -12,6 +12,8 @@ import hashlib
 import subprocess
 import platform
 import os
+import socket
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 from requests.exceptions import RequestException
 
@@ -137,9 +139,8 @@ def send_wol(session_token, mac_address, config):
 
 def ping_host(host, timeout=1):
     param = "-n" if platform.system().lower() == "windows" else "-c"
-    # macOS uses different flag for timeout on ping (use -t for Linux? keep default to 1 probe)
-    timeout_flag = "-W" if platform.system().lower() != "darwin" else "-t"
-    command = ["ping", param, "1", timeout_flag, str(timeout), host]
+    # macOS and Linux differ on timeout flags; keep a minimal portable ping invocation
+    command = ["ping", param, "1", host]
     try:
         subprocess.check_output(command, stderr=subprocess.STDOUT)
         return True
@@ -147,6 +148,28 @@ def ping_host(host, timeout=1):
         return False
     except FileNotFoundError:
         return False
+
+def is_service_up(host, port, timeout=1):
+    """Vérifie qu'un service TCP est joignable sur (host, port).
+    Retourne True si une connexion TCP a réussi, False sinon.
+    """
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+def parse_host_port_from_url(url):
+    parsed = urlparse(url)
+    host = parsed.hostname
+    port = parsed.port
+    # si pas de port, choisir 80/443 en fonction du scheme
+    if port is None:
+        if parsed.scheme == 'https':
+            port = 443
+        else:
+            port = 80
+    return host, port
 
 @app.route('/api/wol', methods=['POST'])
 def api_wol():
@@ -188,7 +211,12 @@ def api_machines():
 
 @app.route('/')
 def gamearena_redirect():
-    if ping_host(GAMEARENA_HOST_IP):
+    # Prefer TCP check on the game server port; fallback to ICMP ping if socket unavailable
+    host, port = parse_host_port_from_url(GAMEARENA_URL)
+    # if GAMEARENA_HOST_IP is set and different, prefer the explicit IP for local network checks
+    check_host = GAMEARENA_HOST_IP or host
+
+    if is_service_up(check_host, port, timeout=1):
         return redirect(GAMEARENA_URL)
 
     config = load_config()
