@@ -211,14 +211,16 @@ def api_machines():
 
 @app.route('/')
 def gamearena_redirect():
-    # Prefer TCP check on the game server port; fallback to ICMP ping if socket unavailable
+    # 1) Vérifier si le service GAMEARENA_URL est joignable (préférence TCP)
     host, port = parse_host_port_from_url(GAMEARENA_URL)
-    # if GAMEARENA_HOST_IP is set and different, prefer the explicit IP for local network checks
+    # si GAMEARENA_HOST_IP est défini, l'utiliser pour les checks locaux
     check_host = GAMEARENA_HOST_IP or host
 
     if is_service_up(check_host, port, timeout=1):
+        # Le service est déjà UP => redirection immédiate
         return redirect(GAMEARENA_URL)
 
+    # 2) Service non joignable -> tenter le Wake-on-LAN via la Freebox
     config = load_config()
     if not config:
         return render_template('error.html',
@@ -226,10 +228,11 @@ def gamearena_redirect():
                              message="Le token Freebox n'est pas configuré.",
                              details="Exécutez d'abord: python3 freebox_auth.py")
 
+    # retrouver la MAC correspondant à l'IP locale
     gamearena_mac = None
     for machine in MACHINES.values():
-        if machine["ip"] == GAMEARENA_HOST_IP:
-            gamearena_mac = machine["mac"]
+        if machine.get("ip") == GAMEARENA_HOST_IP:
+            gamearena_mac = machine.get("mac")
             break
 
     if not gamearena_mac:
@@ -237,11 +240,26 @@ def gamearena_redirect():
                              title="Machine non configurée",
                              message=f"L'adresse IP {GAMEARENA_HOST_IP} n'est pas configurée dans MACHINES.")
 
+    # Attempt login + send WOL. On renvoie le résultat à la page d'attente pour affichage/debug.
+    session_token, err = login_freebox(config)
+    wol_status = False
+    wol_details = None
+
+    if session_token:
+        success, details = send_wol(session_token, gamearena_mac, config)
+        wol_status = success
+        wol_details = details
+    else:
+        wol_status = False
+        wol_details = err
+
     return render_template('gamearena_waiting.html',
                          mac=gamearena_mac,
                          ip=GAMEARENA_HOST_IP,
                          url=GAMEARENA_URL,
-                         max_wait=MAX_WAIT_TIME)
+                         max_wait=MAX_WAIT_TIME,
+                         wol_status=wol_status,
+                         wol_details=wol_details)
 
 @app.route('/debug')
 def debug_info():
