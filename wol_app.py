@@ -80,7 +80,7 @@ except Exception:
 DEFAULT_FREEBOX_URL = "http://mafreebox.freebox.fr"
 TIMEOUT = 10  # timeout pour requests en secondes
 
-CONFIG_FILE = os.environ.get('FREEBOX_TOKEN_PATH')
+CONFIG_FILE = os.environ.get('FREEBOX_TOKEN_PATH', os.path.join(BASE_DIR, ".freebox_token"))
 # Allow FREEBOX_IP from .env as an override/fallback
 ENV_FREEBOX_IP = os.environ.get('FREEBOX_IP')
 
@@ -97,6 +97,9 @@ MACHINES = {
 }
 
 def load_config():
+    # defensive: ensure CONFIG_FILE is a valid path-like string
+    if not CONFIG_FILE or not isinstance(CONFIG_FILE, (str, bytes, os.PathLike)):
+        return None
     try:
         with open(CONFIG_FILE, "r") as f:
             return json.load(f)
@@ -347,10 +350,20 @@ def health_check():
     Retourne 200 si les fichiers de configuration essentiels sont présents et parsables.
     Ne tente PAS d'appeler la Freebox (pour éviter latence/erreurs réseau).
     """
-    cfg_exists = os.path.exists(CONFIG_FILE)
+    cfg_exists = False
     cfg_ok = False
     cfg_err = None
     cfg_content = None
+
+    # defensive: ensure CONFIG_FILE is a valid path-like
+    if CONFIG_FILE and isinstance(CONFIG_FILE, (str, bytes, os.PathLike)):
+        try:
+            cfg_exists = os.path.exists(CONFIG_FILE)
+        except Exception:
+            cfg_exists = False
+    else:
+        cfg_exists = False
+
     if cfg_exists:
         try:
             with open(CONFIG_FILE, 'r') as f:
