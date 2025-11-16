@@ -153,3 +153,49 @@ python3.9 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+### Redémarrage manuel de nginx et Gunicorn
+
+Si vous devez redémarrer rapidement le reverse proxy ou l'application, voici les commandes usuelles.
+
+Redémarrage via systemd (recommandé si vous avez installé les units)
+
+```bash
+# redémarrer nginx
+sudo systemctl restart nginx
+sudo systemctl status nginx --no-pager
+sudo journalctl -u nginx -n 200 --no-pager
+
+# redémarrer le service gunicorn (unit 'wol.service' ou 'wol-bind-local.service')
+sudo systemctl restart wol.service
+sudo systemctl status wol.service --no-pager
+sudo journalctl -u wol.service -n 200 --no-pager
+```
+
+Redémarrage manuel (foreground) — utile pour debug rapide
+
+```bash
+# activer le venv puis lancer en foreground (en tant qu'utilisateur d'exécution, ex: 'wol')
+cd /home/wol/Wake-on-lan
+source .venv/bin/activate
+# lancer gunicorn en foreground pour voir les logs directement
+/home/wol/Wake-on-lan/.venv/bin/gunicorn -w 2 -b unix:/run/wakeonlan/wakeonlan.sock wol_app:app --access-logfile - --error-logfile -
+# ou pour binding TCP (développement)
+sudo -u wol -H bash -lc 'cd /home/wol/Wake-on-lan && . .venv/bin/activate && /home/wol/Wake-on-lan/.venv/bin/gunicorn -w 2 -b unix:/run/wakeonlan/wakeonlan.sock wol_app:app --access-logfile - --error-logfile -'
+# note: si démarre correctement, Ctrl+C pour quitter ; sinon copiez l'erreur.
+
+# vérifier les erreurs possibles dans les logs système
+journalctl -xe --no-pager
+```
+
+Vérifier la socket (si vous utilisez socket unix)
+
+```bash
+ls -l /run/wakeonlan/wakeonlan.sock
+# permissions et ownership doivent permettre à nginx (www-data) d'accéder au socket
+```
+
+Notes
+
+- Préférez les unités `systemd` en production : elles gèrent le redémarrage automatique, les droits et le runtime directory.
+- Les commandes foreground sont uniquement pour le debug local ; utilisez-les sous un terminal dédié et arrêtez avec Ctrl+C.

@@ -279,3 +279,131 @@ sudo fail2ban-client status nginx-http-auth
 10) Attention
 
 - Un mauvais filtre ou une configuration trop agressive peut couper l'accès administratif. Toujours tester et mettre en place une IP d'administration dans `ignoreip`.
+
+## Mettre à jour le kernel et activer nft/iptables (Raspberry Pi)
+
+Contexte
+
+Sur certaines images ou versions de noyau Raspberry Pi, les modules netfilter (nf_tables, ip_tables, xtables, ...) peuvent être absents ou non chargés, ce qui empêche `nft`, `iptables` ou des outils comme `fail2ban`/`ufw` de fonctionner (erreur fréquente : "Failed to initialize nft: Protocol not supported" ou "Module ip_tables not found"). Cette section décrit comment diagnostiquer le problème et deux voies de réparation : activer `nft` si possible ou mettre à jour le kernel officiel Raspberry Pi.
+
+Checklist rapide
+
+- [ ] Vérifier la version du noyau et la présence des modules netfilter
+- [ ] Tester `nft` et `iptables-legacy`/`iptables-nft`
+- [ ] Si possible : utiliser `iptables-nft`/`nft` (moderne)
+- [ ] Sinon : mettre à jour/réinstaller le kernel Raspberry Pi officiel et redémarrer
+- [ ] Après reboot : vérifier modules, reconfigurer alternatives iptables si nécessaire, relancer `fail2ban`/`ufw`
+
+Important : ces opérations peuvent nécessiter un redémarrage et modifier le comportement réseau. Sauvegardez les configurations importantes et planifiez un accès console si possible.
+
+1) Diagnostic rapide
+
+Exécutez ces commandes pour comprendre l'état actuel :
+
+```bash
+uname -a
+sudo lsmod | grep -E 'nf_tables|ip_tables|x_tables' || true
+sudo modprobe nf_tables || echo "nf_tables unavailable"
+sudo modprobe ip_tables || echo "ip_tables unavailable"
+# tester nft
+sudo nft --version 2>/dev/null || echo "nft absent or not supported"
+sudo nft list ruleset 2>/dev/null || echo "nft list ruleset failed"
+# tester iptables legacy
+sudo /usr/sbin/iptables-legacy -L -n --line-numbers 2>/dev/null || echo "iptables-legacy failed"
+```
+
+Interprétation rapide :
+- Si `nft list ruleset` fonctionne → le backend nftables est disponible, vous pouvez utiliser `nft` ou `iptables-nft`.
+- Si `modprobe` échoue et les modules sont absents → le kernel ne fournit pas netfilter et il faut mettre à jour/réinstaller le kernel.
+
+2) Solution A — (si nft disponible) utiliser nft / iptables-nft
+
+Si le diagnostic montre que `nf_tables` est présent :
+
+```bash
+# forcer alternatives vers la version nft (optionnel)
+sudo update-alternatives --set iptables /usr/sbin/iptables-nft || true
+sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-nft || true
+# vérifier
+sudo iptables -L -n --line-numbers
+sudo nft list ruleset
+```
+
+Après cela, relancez et testez `fail2ban` / `ufw` :
+
+```bash
+sudo systemctl restart fail2ban || true
+sudo systemctl restart ufw || true
+sudo fail2ban-client status || true
+sudo ufw status verbose || true
+```
+
+3) Solution B — (si modules manquants) mettre à jour le kernel Raspberry Pi
+
+Si le module `ip_tables` ou `nf_tables` est absent, la solution la plus simple et robuste est de mettre à jour les paquets kernel/bootloader officiels puis de redémarrer.
+
+Avertissement : cette opération demande un reboot. Faites‑le pendant une fenêtre de maintenance.
+
+```bash
+# mettre à jour le système et kernel officiel Raspberry Pi
+sudo apt update
+sudo apt full-upgrade -y
+# réinstaller bootloader + kernel officiels (package names usuels sur Raspberry Pi OS)
+sudo apt install --reinstall raspberrypi-bootloader raspberrypi-kernel -y
+# reboot
+sudo reboot
+```
+
+Après reboot, vérifiez :
+
+```bash
+uname -a
+# vérifier modules
+sudo lsmod | grep -E 'nf_tables|ip_tables|x_tables' || true
+sudo modprobe nf_tables || true
+sudo nft list ruleset || true
+sudo iptables -L -n --line-numbers || true
+```
+
+4) Basculer vers iptables-legacy (si besoin temporaire)
+
+Sur certains systèmes, vous pouvez forcer les alternatives vers `iptables-legacy`, mais si le noyau n'a pas les modules, cela ne résoudra pas tout (message "Module ip_tables not found"). Si le kernel fournit les modules mais les alternatives pointent vers nft, vous pouvez switcher :
+
+```bash
+sudo update-alternatives --set iptables /usr/sbin/iptables-legacy
+sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
+sudo update-alternatives --set arptables /usr/sbin/arptables-legacy || true
+sudo update-alternatives --set ebtables /usr/sbin/ebtables-legacy || true
+# vérifier
+sudo iptables -L -n --line-numbers
+```
+
+5) Vérifier et relancer services (fail2ban / ufw)
+
+Quand le backend netfilter fonctionne, redémarrez et vérifiez les services :
+
+```bash
+sudo systemctl restart fail2ban ufw nginx || true
+sudo systemctl status fail2ban --no-pager
+sudo fail2ban-client status
+sudo ufw status verbose
+sudo iptables -L -n --line-numbers
+```
+
+6) Dépannage rapide
+
+- Message `modprobe: FATAL: Module ip_tables not found in directory /lib/modules/$(uname -r)` → kernel incompatible / modules manquants : appliquez la Solution B.
+- `iptables v1.x can't initialize table 'filter'` → typiquement netfilter absent ou mauvais backend ; vérifiez `dmesg` et logs.
+- Si vous avez un kernel custom, installez les modules correspondants ou revenez au kernel officiel Raspberry Pi.
+
+7) Notes de sécurité / recommandations
+
+- Faire une sauvegarde de la carte SD avant manipulation risquée (upgrade kernel, reboots).
+- Prévoir un plan d’accès console si vous faites ces opérations à distance (sinon risque de perte d’accès réseau après reboot).
+- Après mise à jour, vérifiez attentivement `ufw` / règles iptables pour ne pas vous verrouiller.
+
+8) Exemple d'enchaînement recommandé (rapide)
+
+- Diagnostiquer : exécutez la section 1.
+- Si `modprobe nf_tables` ok → Solution A (activate nft / iptables-nft).
+- Sinon → Solution B (upgrade kernel) puis re-vérifier.
