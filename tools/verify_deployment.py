@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+import sys
+if sys.version_info < (3, 9):
+    sys.stderr.write(f"ERROR: {__file__} requires Python 3.9 or newer (found {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}).\n")
+    sys.exit(1)
+
+# python
 """tools/verify_deployment.py
 Script de vérification post-déploiement pour Wake-on-LAN
 Vérifie :
@@ -198,4 +204,3 @@ if critical_fail:
 else:
     print('OK: all critical checks passed')
     sys.exit(0)
-
