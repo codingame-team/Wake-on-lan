@@ -1,0 +1,29 @@
+# Example systemd service that binds Gunicorn to the Pi local IP (not recommended without nginx/TLS)
+# Usage: set HOST_IP in /home/pi/Wake-on-lan/.env or in the EnvironmentFile
+[Unit]
+Description=Wake-on-LAN Flask app (gunicorn) bound to local IP
+After=network.target
+
+[Service]
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/Wake-on-lan
+EnvironmentFile=/home/pi/Wake-on-lan/.env
+Environment="PATH=/home/pi/Wake-on-lan/.venv/bin"
+# Expect .env to define HOST_IP (ex: HOST_IP=192.168.1.42)
+# ExecStart will expand ${HOST_IP}
+ExecStart=/home/pi/Wake-on-lan/.venv/bin/gunicorn -w 2 -b ${HOST_IP}:5000 wol_app:app \
+    --access-logfile - --error-logfile -
+
+Restart=on-failure
+RestartSec=5s
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
+

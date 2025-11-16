@@ -1,0 +1,32 @@
+# Example systemd service for Raspberry Pi (adjust paths and user)
+[Unit]
+Description=Wake-on-LAN Flask app (gunicorn) on Raspberry Pi
+After=network.target
+
+[Service]
+# Run as the 'pi' user by default; you can create a dedicated 'wol' user instead.
+User=pi
+Group=www-data
+WorkingDirectory=/home/pi/Wake-on-lan
+EnvironmentFile=/home/pi/Wake-on-lan/.env
+Environment="PATH=/home/pi/Wake-on-lan/.venv/bin"
+# Create a runtime directory /run/wakeonlan and place the socket there
+RuntimeDirectory=wakeonlan
+RuntimeDirectoryMode=0750
+# Ensure socket created is group-writable so nginx (www-data) can access it
+UMask=007
+ExecStart=/home/pi/Wake-on-lan/.venv/bin/gunicorn -w 2 -b unix:/run/wakeonlan/wakeonlan.sock wol_app:app \
+    --access-logfile - --error-logfile -
+
+# Restart and basic hardening for Raspberry Pi
+Restart=on-failure
+RestartSec=5s
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

@@ -4,7 +4,7 @@
 Application Flask pour Wake-on-LAN via API Freebox (durcie)
 """
 
-from flask import Flask, render_template, request, jsonify, redirect
+from flask import Flask, render_template, request, jsonify, redirect, abort
 import requests
 import json
 import hmac
@@ -20,22 +20,73 @@ from requests.exceptions import RequestException
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
+ENV_PATH = os.path.join(BASE_DIR, '.env')
 
-load_dotenv(os.path.join(BASE_DIR, '.env'))
+# Charger .env s'il existe
+load_dotenv(ENV_PATH)
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 
-app_secret = os.environ.get('SECRET_KEY') or os.environ.get('FLASK_SECRET') or 'your-secret-key-change-this'
-app.secret_key = app_secret
+# Ensure SECRET_KEY is loaded; if absent, generate one and persist it to .env (permissions 600)
+def ensure_secret_key(env_path):
+    key = os.environ.get('SECRET_KEY') or os.environ.get('FLASK_SECRET')
+    if key:
+        return key, False
+
+    # Générer une clé sécurisée
+    import secrets
+    newkey = secrets.token_urlsafe(32)
+    try:
+        # Créer le fichier .env s'il n'existe pas et ajouter SECRET_KEY
+        # On évite d'écraser des variables existantes
+        if os.path.exists(env_path):
+            with open(env_path, 'a', encoding='utf-8') as f:
+                f.write(f"\nSECRET_KEY={newkey}\n")
+        else:
+            with open(env_path, 'w', encoding='utf-8') as f:
+                f.write(f"SECRET_KEY={newkey}\n")
+        try:
+            os.chmod(env_path, 0o600)
+        except Exception:
+            # chmod peut échouer sur certains systèmes de fichiers (Windows, etc.) — ignorer
+            pass
+        os.environ['SECRET_KEY'] = newkey
+        return newkey, True
+    except Exception:
+        # Si écriture échoue, retourner la clé en mémoire sans persistance
+        os.environ['SECRET_KEY'] = newkey
+        return newkey, False
+
+app_secret, created = ensure_secret_key(ENV_PATH)
+app.config.update(
+    SECRET_KEY=app_secret,
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PREFERRED_URL_SCHEME='https'
+)
+app.secret_key = app.config['SECRET_KEY']
+
+# Activer CSRF si disponible (recommandé si formulaire POST/écriture côté utilisateur)
+try:
+    from flask_wtf import CSRFProtect
+    csrf = CSRFProtect()
+    csrf.init_app(app)
+    _csrf_enabled = True
+except Exception:
+    _csrf_enabled = False
 
 # Par défaut; sera remplacé par la valeur du fichier .freebox_token si présente
 DEFAULT_FREEBOX_URL = "http://mafreebox.freebox.fr"
 TIMEOUT = 10  # timeout pour requests en secondes
 
-CONFIG_FILE = os.path.join(BASE_DIR, ".freebox_token")
-GAMEARENA_URL = "http://philippe.mourey.com:60001"
-GAMEARENA_HOST_IP = "192.168.1.100"
-MAX_WAIT_TIME = 120
+CONFIG_FILE = os.environ.get('FREEBOX_TOKEN_PATH')
+# Allow FREEBOX_IP from .env as an override/fallback
+ENV_FREEBOX_IP = os.environ.get('FREEBOX_IP')
+
+GAMEARENA_URL = os.environ.get('GAMEARENA_URL')
+GAMEARENA_HOST_IP = os.environ.get('GAMEARENA_HOST_IP')
+MAX_WAIT_TIME = int(os.environ.get('MAX_WAIT_TIME', '120'))
 
 MACHINES = {
     "windows-pc": {
@@ -60,6 +111,12 @@ def get_freebox_base(config):
         url = config.get("freebox_url")
         if url:
             return url.rstrip('/')
+    # If freebox IP is provided via environment, build a URL
+    if ENV_FREEBOX_IP:
+        # If user provided an IP that likely includes scheme or not, normalize
+        if ENV_FREEBOX_IP.startswith('http://') or ENV_FREEBOX_IP.startswith('https://'):
+            return ENV_FREEBOX_IP.rstrip('/')
+        return f"http://{ENV_FREEBOX_IP}"
     return DEFAULT_FREEBOX_URL
 
 def safe_json(resp):
@@ -263,6 +320,11 @@ def gamearena_redirect():
 
 @app.route('/debug')
 def debug_info():
+    # Ne doit être disponible qu'en mode debug explicite ou si ALLOW_DEBUG=1
+    allow_debug = os.environ.get('ALLOW_DEBUG', '0') in ('1', 'true', 'True')
+    if not (app.debug or allow_debug):
+        abort(404)
+
     debug_data = {
         "base_dir": BASE_DIR,
         "config_file_path": CONFIG_FILE,
@@ -278,6 +340,38 @@ def debug_info():
             config_content = f"Error reading file: {str(e)}"
     debug_data["config_content"] = config_content
     return jsonify(debug_data)
+
+@app.route('/health')
+def health_check():
+    """Endpoint de santé minimal.
+    Retourne 200 si les fichiers de configuration essentiels sont présents et parsables.
+    Ne tente PAS d'appeler la Freebox (pour éviter latence/erreurs réseau).
+    """
+    cfg_exists = os.path.exists(CONFIG_FILE)
+    cfg_ok = False
+    cfg_err = None
+    cfg_content = None
+    if cfg_exists:
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                cfg_content = json.load(f)
+            # quick validity checks
+            if isinstance(cfg_content, dict) and 'app_id' in cfg_content and 'app_token' in cfg_content:
+                cfg_ok = True
+            else:
+                cfg_err = 'token file missing app_id or app_token'
+        except Exception as e:
+            cfg_err = str(e)
+    else:
+        cfg_err = 'token file not found'
+
+    return jsonify({
+        'ok': cfg_ok,
+        'config_file_path': CONFIG_FILE,
+        'config_file_exists': cfg_exists,
+        'config_valid': cfg_ok,
+        'config_error': cfg_err
+    }), (200 if cfg_ok else 503)
 
 if __name__ == '__main__':
     print("🏠 Wake-on-LAN Web Interface")
@@ -298,12 +392,19 @@ if __name__ == '__main__':
         print(f"     MAC: {machine['mac']}")
         print(f"     IP: {machine['ip']}")
 
-    secret_key_status = "✅" if app_secret != 'your-secret-key-change-this' else "❌"
+    secret_key_status = "✅" if not (app.config['SECRET_KEY'] is None) else "❌"
     print(f"\n🔑 Clé secrète chargée: {secret_key_status}")
+    if created:
+        print("⚠️ Une nouvelle SECRET_KEY a été générée et ajoutée à .env (permissions 600).")
 
     print("\n🌐 Interface web disponible sur:")
-    print("   http://localhost:5001")
+    print("   http://127.0.0.1:5000 (préconisé: exécuter derrière gunicorn/nginx en production)")
     print("\nAppuyez sur Ctrl+C pour arrêter")
     print("="*60)
 
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # En développement local on permet l'écoute sur 127.0.0.1 par défaut ;
+    # en production, n'utilisez pas flask run (préférez gunicorn derrière nginx)
+    host = os.environ.get('FLASK_RUN_HOST', '127.0.0.1')
+    port = int(os.environ.get('FLASK_RUN_PORT', '5000'))
+    debug_flag = os.environ.get('FLASK_DEBUG', '0') in ('1', 'true', 'True')
+    app.run(host=host, port=port, debug=debug_flag)
