@@ -126,3 +126,30 @@ Sécurité et recommandations :
 
 - Si vous exposez Gunicorn directement sur la WAN via NAT, vous devez au minimum configurer un firewall, nginx ou un reverse proxy pour TLS/HTTP headers, et limiter l'accès (ex: via port forwarding restreint, VPN ou filtrage IP). Sans TLS, les cookies et données transitent en clair.
 - Préférez la configuration avec nginx (proxy) et TLS. L'exposition directe de Gunicorn sur Internet n'est pas recommandée.
+
+### Prérequis
+
+- Python 3.9 ou une version plus récente est requis pour exécuter l'application et les scripts de support.
+
+Vérifiez votre version de Python sur le Raspberry Pi :
+
+```bash
+python3 --version
+```
+
+Si votre Python système est antérieur à 3.9, installez une version plus récente de Python (via apt si disponible ou à partir des sources/pyenv) ou exécutez l'application sur un hôte avec Python 3.9 ou plus.
+
+Exemple pour installer Python 3.9 sur Debian/Raspbian s'il est disponible via apt :
+
+```bash
+sudo apt update
+sudo apt install -y python3.9 python3.9-venv python3.9-dev
+```
+
+Lors de l'utilisation d'un virtualenv, assurez-vous qu'il utilise Python 3.9 :
+
+```bash
+python3.9 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
