@@ -50,12 +50,23 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   log "Repo exists, pulling latest changes"
   # Ensure correct ownership for pulling
   chown -R $RUN_USER:$RUN_USER $INSTALL_DIR || true
-  su - $RUN_USER -c "cd $INSTALL_DIR && git pull || true"
+  su - $RUN_USER -c "cd $INSTALL_DIR && git pull --ff-only || true"
 else
   # Ensure parent dir exists and owned by run user
-  mkdir -p $(dirname "$INSTALL_DIR")
-  chown $(dirname "$INSTALL_DIR") || true || true
-  su - $RUN_USER -c "git clone $REPO_URL $INSTALL_DIR"
+  mkdir -p "$(dirname "$INSTALL_DIR")"
+  # set ownership of parent dir so the non-root user can create the repo
+  chown "$RUN_USER:$RUN_USER" "$(dirname "$INSTALL_DIR")" || true
+
+  log "Clonage du dépôt $REPO_URL dans $INSTALL_DIR"
+  # attempt a shallow clone as the run user; fail with actionable message if authentication required
+  if ! su - "$RUN_USER" -c "git clone --depth 1 '$REPO_URL' '$INSTALL_DIR'"; then
+    echo "[ERROR] git clone failed. Possible causes: repository is private or network/authentication issue." >&2
+    echo "Please ensure the Raspberry Pi can access the repository. Options:" >&2
+    echo "  - configure an SSH key for user $RUN_USER and use the git+ssh URL (git@github.com:...)" >&2
+    echo "  - make the repository public or provide HTTPS credentials (not recommended in scripts)." >&2
+    echo "You can also clone manually as the deployment user and re-run this script." >&2
+    exit 1
+  fi
 fi
 
 log "Création et activation d'un virtualenv"
