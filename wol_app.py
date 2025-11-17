@@ -105,13 +105,14 @@ ENV_FREEBOX_IP = os.environ.get('FREEBOX_IP')
 
 GAMEARENA_URL = os.environ.get('GAMEARENA_URL')
 GAMEARENA_HOST_IP = os.environ.get('GAMEARENA_HOST_IP')
+GAMEARENA_PORT = int(os.environ.get('GAMEARENA_PORT'))
 MAX_WAIT_TIME = int(os.environ.get('MAX_WAIT_TIME', '120'))
 
 MACHINES = {
-    "windows-pc": {
-        "name": "PC Windows (192.168.1.100)",
-        "mac": "00:23:24:F2:63:4D",
-        "ip": "192.168.1.100"
+    "gamearena_server": {
+        "name": "GameArena Server",
+        "mac": os.environ.get('GAMEARENA_MAC'),
+        "ip": GAMEARENA_HOST_IP
     },
 }
 
@@ -285,9 +286,10 @@ def api_ping(ip):
 
 @app.route('/api/service-check')
 def api_service_check():
-    host, port = parse_host_port_from_url(GAMEARENA_URL)
+    host, _ = parse_host_port_from_url(GAMEARENA_URL)
     check_host = GAMEARENA_HOST_IP or host
-    
+    port = GAMEARENA_PORT
+
     ping_result = ping_host(check_host)
     service_result = is_service_up(check_host, port, timeout=2)
     
@@ -312,9 +314,10 @@ def api_machines():
 @app.route('/')
 def gamearena_redirect():
     # 1) Vérifier si le service GAMEARENA_URL est joignable (préférence TCP)
-    host, port = parse_host_port_from_url(GAMEARENA_URL)
+    host, _ = parse_host_port_from_url(GAMEARENA_URL)
     # si GAMEARENA_HOST_IP est défini, l'utiliser pour les checks locaux
     check_host = GAMEARENA_HOST_IP or host
+    port = GAMEARENA_PORT
 
     # Vérifier d'abord si le PC est allumé (ping)
     pc_online = ping_host(check_host)
