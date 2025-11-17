@@ -111,7 +111,7 @@ MAX_WAIT_TIME = int(os.environ.get('MAX_WAIT_TIME', '120'))
 MACHINES = {
     "gamearena_server": {
         "name": "GameArena Server",
-        "mac": os.environ.get('GAMEARENA_MAC'),
+        "mac": os.environ.get('GAMEARENA_HOST_MAC'),
         "ip": GAMEARENA_HOST_IP
     },
 }
