@@ -301,13 +301,19 @@ def gamearena_redirect():
     pc_online = ping_host(check_host)
     service_ready = is_service_up(check_host, port, timeout=1)
     
+    print(f"DEBUG: host={host}, port={port}, check_host={check_host}")
+    print(f"DEBUG: pc_online={pc_online}, service_ready={service_ready}")
+    print(f"DEBUG: GAMEARENA_URL={GAMEARENA_URL}")
+    
     if service_ready:
         # Le service est déjà UP => redirection immédiate
+        print(f"DEBUG: Redirecting to {GAMEARENA_URL} (service ready)")
         return redirect(GAMEARENA_URL)
     
     # Si le PC est allumé mais service pas prêt, rediriger quand même
     # Le navigateur attendra que le service soit prêt
     if pc_online:
+        print(f"DEBUG: Redirecting to {GAMEARENA_URL} (PC online)")
         return redirect(GAMEARENA_URL)
 
     # 2) Service non joignable -> tenter le Wake-on-LAN via la Freebox
