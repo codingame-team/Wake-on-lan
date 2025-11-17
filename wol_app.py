@@ -5,6 +5,7 @@ Application Flask pour Wake-on-LAN via API Freebox (durcie)
 """
 
 from flask import Flask, render_template, request, jsonify, redirect, abort
+from requests import adapters, Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 import requests
 import json
@@ -17,6 +18,7 @@ import socket
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 from requests.exceptions import RequestException
+import logging
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
@@ -30,6 +32,10 @@ app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 
 # Configuration pour proxy nginx - ESSENTIEL pour que les redirections fonctionnent
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=0)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger('wakeonlan')
 
 # Ensure SECRET_KEY is loaded; if absent, generate one and persist it to .env (permissions 600)
 def ensure_secret_key(env_path):
@@ -82,7 +88,16 @@ except Exception:
 
 # Par défaut; sera remplacé par la valeur du fichier .freebox_token si présente
 DEFAULT_FREEBOX_URL = "http://mafreebox.freebox.fr"
-TIMEOUT = 10  # timeout pour requests en secondes
+# TIMEOUT = 10  # timeout pour requests en secondes
+# Replace with named timeouts
+REQUEST_TIMEOUT = int(os.environ.get('REQUEST_TIMEOUT', '8'))
+CONNECT_TIMEOUT = int(os.environ.get('CONNECT_TIMEOUT', '2'))
+READ_TIMEOUT = int(os.environ.get('READ_TIMEOUT', '5'))
+# Session for HTTP calls with sensible defaults
+_http_session = Session()
+_adapter = adapters.HTTPAdapter(max_retries=1)
+_http_session.mount('http://', _adapter)
+_http_session.mount('https://', _adapter)
 
 CONFIG_FILE = os.environ.get('FREEBOX_TOKEN_PATH', os.path.join(BASE_DIR, ".freebox_token"))
 # Allow FREEBOX_IP from .env as an override/fallback
@@ -139,8 +154,9 @@ def safe_json(resp):
 def get_challenge(base_url):
     url = f"{base_url}/api/v8/login/"
     try:
-        resp = requests.get(url, timeout=TIMEOUT)
+        resp = _http_session.get(url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
     except RequestException as e:
+        logger.debug(f"Network error getting challenge: {e}")
         return None, f"Network error getting challenge: {e}"
     data, err = safe_json(resp)
     if err:
@@ -164,13 +180,15 @@ def login_freebox(config):
             hashlib.sha1
         ).hexdigest()
     except Exception as e:
+        logger.exception("Error computing HMAC")
         return None, f"Error computing HMAC: {e}"
 
     url = f"{base_url}/api/v8/login/session/"
     payload = {"app_id": config["app_id"], "password": password}
     try:
-        resp = requests.post(url, json=payload, timeout=TIMEOUT)
+        resp = _http_session.post(url, json=payload, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
     except RequestException as e:
+        logger.debug(f"Network error during login: {e}")
         return None, f"Network error during login: {e}"
 
     data, err = safe_json(resp)
@@ -190,8 +208,9 @@ def send_wol(session_token, mac_address, config):
     payload = {"mac": mac_address}
 
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=TIMEOUT)
+        resp = _http_session.post(url, json=payload, headers=headers, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
     except RequestException as e:
+        logger.debug(f"Network error sending WOL: {e}")
         return False, f"Network error sending WOL: {e}"
 
     data, err = safe_json(resp)
@@ -221,7 +240,7 @@ def is_service_up(host, port, timeout=1):
         with socket.create_connection((host, int(port)), timeout=timeout):
             return True
     except Exception as e:
-        print(f"DEBUG: Service check failed for {host}:{port} - {e}")
+        logger.debug(f"Service check failed for {host}:{port} - {e}")
         return False
 
 def parse_host_port_from_url(url):
@@ -300,20 +319,17 @@ def gamearena_redirect():
     # Vérifier d'abord si le PC est allumé (ping)
     pc_online = ping_host(check_host)
     service_ready = is_service_up(check_host, port, timeout=1)
-    
-    print(f"DEBUG: host={host}, port={port}, check_host={check_host}")
-    print(f"DEBUG: pc_online={pc_online}, service_ready={service_ready}")
-    print(f"DEBUG: GAMEARENA_URL={GAMEARENA_URL}")
-    
+
+    logger.debug(f"host={host}, port={port}, check_host={check_host}")
+    logger.debug(f"pc_online={pc_online}, service_ready={service_ready}")
+    logger.debug(f"GAMEARENA_URL={GAMEARENA_URL}")
+
     if service_ready:
-        # Le service est déjà UP => redirection immédiate
-        print(f"DEBUG: Redirecting to {GAMEARENA_URL} (service ready)")
+        logger.debug(f"Redirecting to {GAMEARENA_URL} (service ready)")
         return redirect(GAMEARENA_URL)
-    
-    # Si le PC est allumé mais service pas prêt, rediriger quand même
-    # Le navigateur attendra que le service soit prêt
+
     if pc_online:
-        print(f"DEBUG: Redirecting to {GAMEARENA_URL} (PC online)")
+        logger.debug(f"Redirecting to {GAMEARENA_URL} (PC online)")
         return redirect(GAMEARENA_URL)
 
     # 2) Service non joignable -> tenter le Wake-on-LAN via la Freebox

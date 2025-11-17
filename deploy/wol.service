@@ -1,32 +1,48 @@
 # Example systemd service for Raspberry Pi (adjust paths and user)
 [Unit]
-Description=Wake-on-LAN Flask app (gunicorn) on Raspberry Pi
+Description=WakeOnLan Gunicorn (example service)
 After=network.target
 
 [Service]
-# Run as the 'pi' user by default; you can create a dedicated 'wol' user instead.
-User=pi
-Group=www-data
-WorkingDirectory=/home/pi/Wake-on-lan
-EnvironmentFile=/home/pi/Wake-on-lan/.env
-Environment="PATH=/home/pi/Wake-on-lan/.venv/bin"
-# Create a runtime directory /run/wakeonlan and place the socket there
-RuntimeDirectory=wakeonlan
-RuntimeDirectoryMode=0750
-# Ensure socket created is group-writable so nginx (www-data) can access it
-UMask=007
-ExecStart=/home/pi/Wake-on-lan/.venv/bin/gunicorn -w 2 -b unix:/run/wakeonlan/wakeonlan.sock wol_app:app \
-    --access-logfile - --error-logfile - --timeout 30 --keep-alive 2
+# Run as the 'wol' user (create user 'wol' and place code in /home/wol/Wake-on-lan)
+User=wol
+Group=wol
+WorkingDirectory=/home/wol/Wake-on-lan
+# If you use a virtualenv, point ExecStart to the venv gunicorn binary below.
+# Ensure the PATH contains the venv bin so subprocesses can find python if needed.
+Environment=PATH=/home/wol/Wake-on-lan/.venv/bin:/usr/local/bin:/usr/bin
+# Allow binding to port 80 without running as root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
-# Restart and basic hardening for Raspberry Pi
+# Gunicorn exec: adjust the path to the gunicorn binary installed in the venv
+ExecStart=/home/wol/Wake-on-lan/.venv/bin/gunicorn \
+  --chdir /home/wol/Wake-on-lan \
+  --worker-class gthread \
+  --workers 2 \
+  --threads 4 \
+  --timeout 120 \
+  --graceful-timeout 30 \
+  --bind 0.0.0.0:80 \
+  --access-logfile - \
+  --error-logfile - \
+  wol_app:app
+
+# Restart and basic hardening
 Restart=on-failure
 RestartSec=5s
+# Give workers a bit more time to stop gracefully
+TimeoutStopSec=60s
+KillMode=mixed
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=yes
 NoNewPrivileges=yes
 PrivateDevices=yes
 LimitNOFILE=4096
+
+# Let systemd capture stdout/stderr into the journal
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
