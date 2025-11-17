@@ -220,7 +220,8 @@ def is_service_up(host, port, timeout=1):
     try:
         with socket.create_connection((host, int(port)), timeout=timeout):
             return True
-    except Exception:
+    except Exception as e:
+        print(f"DEBUG: Service check failed for {host}:{port} - {e}")
         return False
 
 def parse_host_port_from_url(url):
@@ -263,6 +264,22 @@ def api_ping(ip):
     online = ping_host(ip)
     return jsonify({"ip": ip, "online": online})
 
+@app.route('/api/service-check')
+def api_service_check():
+    host, port = parse_host_port_from_url(GAMEARENA_URL)
+    check_host = GAMEARENA_HOST_IP or host
+    
+    ping_result = ping_host(check_host)
+    service_result = is_service_up(check_host, port, timeout=2)
+    
+    return jsonify({
+        "gamearena_url": GAMEARENA_URL,
+        "check_host": check_host,
+        "port": port,
+        "ping_ok": ping_result,
+        "service_up": service_result
+    })
+
 @app.route('/api/machines')
 def api_machines():
     machines_with_status = {}
@@ -280,8 +297,17 @@ def gamearena_redirect():
     # si GAMEARENA_HOST_IP est défini, l'utiliser pour les checks locaux
     check_host = GAMEARENA_HOST_IP or host
 
-    if is_service_up(check_host, port, timeout=1):
+    # Vérifier d'abord si le PC est allumé (ping)
+    pc_online = ping_host(check_host)
+    service_ready = is_service_up(check_host, port, timeout=1)
+    
+    if service_ready:
         # Le service est déjà UP => redirection immédiate
+        return redirect(GAMEARENA_URL)
+    
+    # Si le PC est allumé mais service pas prêt, rediriger quand même
+    # Le navigateur attendra que le service soit prêt
+    if pc_online:
         return redirect(GAMEARENA_URL)
 
     # 2) Service non joignable -> tenter le Wake-on-LAN via la Freebox
