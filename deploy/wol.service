@@ -16,7 +16,7 @@ RuntimeDirectoryMode=0750
 # Ensure socket created is group-writable so nginx (www-data) can access it
 UMask=007
 ExecStart=/home/pi/Wake-on-lan/.venv/bin/gunicorn -w 2 -b unix:/run/wakeonlan/wakeonlan.sock wol_app:app \
-    --access-logfile - --error-logfile -
+    --access-logfile - --error-logfile - --timeout 30 --keep-alive 2
 
 # Restart and basic hardening for Raspberry Pi
 Restart=on-failure

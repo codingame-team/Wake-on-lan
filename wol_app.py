@@ -5,6 +5,7 @@ Application Flask pour Wake-on-LAN via API Freebox (durcie)
 """
 
 from flask import Flask, render_template, request, jsonify, redirect, abort
+from werkzeug.middleware.proxy_fix import ProxyFix
 import requests
 import json
 import hmac
@@ -26,6 +27,9 @@ ENV_PATH = os.path.join(BASE_DIR, '.env')
 load_dotenv(ENV_PATH)
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
+
+# Configuration pour proxy nginx - ESSENTIEL pour que les redirections fonctionnent
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=0)
 
 # Ensure SECRET_KEY is loaded; if absent, generate one and persist it to .env (permissions 600)
 def ensure_secret_key(env_path):
