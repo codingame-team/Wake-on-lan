@@ -1,3 +1,14 @@
+# DEPRECATED: wol.service
+# This file is kept for historical/reference purposes only.
+# DO NOT enable or use this unit. The canonical unit to use is `wakeonlan.service`.
+#
+# To remove the old unit from a system where it was previously deployed, run:
+#   sudo systemctl disable --now wol.service || true
+#   sudo rm -f /etc/systemd/system/wol.service || true
+#   sudo systemctl daemon-reload
+#
+# If you need the recommended unit file, use the provided `deploy/wakeonlan.service`.
+
 # Example systemd service for Raspberry Pi (adjust paths and user)
 [Unit]
 Description=WakeOnLan Gunicorn (example service)

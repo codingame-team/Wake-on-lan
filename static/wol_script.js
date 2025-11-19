@@ -107,8 +107,13 @@ async function waitForOnline(machineId, ip, btn, attempt) {
         // Continue a attendre
     }
     
-    // Reessayer apres 1 seconde
+    // Adaptive backoff: base 1s + 250ms per attempt, capped at 8s
+    let delay = Math.min(1000 + attempt * 250, 8000);
+    // If the page is hidden, reduce polling intensity
+    if (typeof document !== 'undefined' && document.hidden) {
+        delay = Math.min(delay * 3, 60000);
+    }
     setTimeout(function() {
         waitForOnline(machineId, ip, btn, attempt + 1);
-    }, 1000);
+    }, delay);
 }

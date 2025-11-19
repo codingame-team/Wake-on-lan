@@ -119,7 +119,16 @@
                 addLog('Attente... (' + attempt + 's ecoulees)');
             }
             
-            setTimeout(function() { waitForOnline(attempt + 1); }, 1000);
+            // Backoff adaptatif: augmenter progressivement l'intervalle entre checks
+            // Base 1s, +250ms par tentative, plafonné à 8s; si onglet caché on multiplie par 3
+            let delay = Math.min(1000 + attempt * 250, 8000);
+            if (typeof document !== 'undefined' && document.hidden) {
+                delay = Math.min(delay * 3, 60000); // espacer fortement si onglet en arrière-plan
+            }
+            // Debug log occasional pour vérifier le rythme
+            if (attempt % 5 === 0) addLog('Prochaine verification dans ' + (delay/1000).toFixed(1) + 's (tentative ' + attempt + ')');
+
+            setTimeout(function() { waitForOnline(attempt + 1); }, delay);
         }
         
         // Demarrer le processus

@@ -1,3 +1,14 @@
+# DEPRECATED: wol-bind-local.service
+# This file is kept for historical/reference purposes only.
+# The canonical service to use is `wakeonlan.service` or `wakeonlan-bind-local.service` (if present)
+#
+# To remove this old unit from a system where it was previously deployed, run:
+#   sudo systemctl disable --now wol-bind-local.service || true
+#   sudo rm -f /etc/systemd/system/wol-bind-local.service || true
+#   sudo systemctl daemon-reload
+#
+# Use the `deploy/` directory to find the recommended unit file(s).
+
 # Example systemd service that binds Gunicorn to the Pi local IP (not recommended without nginx/TLS)
 # Usage: set HOST_IP in /home/pi/Wake-on-lan/.env or in the EnvironmentFile
 [Unit]
@@ -26,4 +37,3 @@ LimitNOFILE=4096
 
 [Install]
 WantedBy=multi-user.target
-

@@ -7,7 +7,6 @@ Application Flask pour Wake-on-LAN via API Freebox (durcie)
 from flask import Flask, render_template, request, jsonify, redirect, abort
 from requests import adapters, Session
 from werkzeug.middleware.proxy_fix import ProxyFix
-import requests
 import json
 import hmac
 import hashlib
@@ -105,7 +104,12 @@ ENV_FREEBOX_IP = os.environ.get('FREEBOX_IP')
 
 GAMEARENA_URL = os.environ.get('GAMEARENA_URL')
 GAMEARENA_HOST_IP = os.environ.get('GAMEARENA_HOST_IP')
-GAMEARENA_PORT = int(os.environ.get('GAMEARENA_PORT'))
+# Parse GAMEARENA_PORT robustly: None if not set or invalid
+_gamearena_port_env = os.environ.get('GAMEARENA_PORT')
+try:
+    GAMEARENA_PORT = int(_gamearena_port_env) if _gamearena_port_env is not None else None
+except (TypeError, ValueError):
+    GAMEARENA_PORT = None
 MAX_WAIT_TIME = int(os.environ.get('MAX_WAIT_TIME', '120'))
 
 MACHINES = {

@@ -199,3 +199,32 @@ Notes
 
 - Préférez les unités `systemd` en production : elles gèrent le redémarrage automatique, les droits et le runtime directory.
 - Les commandes foreground sont uniquement pour le debug local ; utilisez-les sous un terminal dédié et arrêtez avec Ctrl+C.
+
+### Unités systemd : conserver `wakeonlan.service`, supprimer les anciennes unités
+
+Le déploiement canonique utilise l'unité `wakeonlan.service` fournie dans `deploy/wakeonlan.service` (ou `wakeonlan-bind-local.service` pour la variante bind-local).
+
+Si votre système contient encore les unités historiques `wol.service` ou `wol-bind-local.service`, supprimez-les pour éviter les conflits et redémarrages répétés.
+
+Commandes recommandées (exécuter sur le Raspberry Pi en tant que root / via sudo) :
+
+```bash
+# Désactiver et supprimer les unités obsolètes si elles existent
+sudo systemctl disable --now wol.service || true
+sudo systemctl disable --now wol-bind-local.service || true
+sudo rm -f /etc/systemd/system/wol.service /etc/systemd/system/wol-bind-local.service || true
+# Recharger systemd pour prendre en compte les suppressions
+sudo systemctl daemon-reload
+```
+
+Ensuite, installez et activez l'unité recommandée :
+
+```bash
+# Copier l'unité recommandée (adaptez les chemins si besoin)
+sudo cp deploy/wakeonlan.service /etc/systemd/system/wakeonlan.service
+sudo systemctl daemon-reload
+# Activer et démarrer le service canonique
+sudo systemctl enable --now wakeonlan.service
+# Suivre les logs
+sudo journalctl -u wakeonlan.service -f
+```
