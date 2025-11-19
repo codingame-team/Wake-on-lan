@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from requests.exceptions import RequestException
 import logging
+import time
+from threading import Lock
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
@@ -278,6 +280,70 @@ def parse_host_port_from_url(url):
             port = 80
     return host, port
 
+# Simple in-memory cache for ping results to debounce frequent client polls
+PING_CACHE = {}
+PING_CACHE_LOCK = Lock()
+# seconds: TTL for cached ping results; configurable via env
+try:
+    PING_CACHE_TTL = float(os.environ.get('PING_CACHE_TTL', '10'))
+except Exception:
+    PING_CACHE_TTL = 10.0
+
+# Rate limiting state (simple in-process sliding window per client IP)
+PING_RATE_MAP = {}
+PING_RATE_LOCK = Lock()
+try:
+    PING_RATE_LIMIT = int(os.environ.get('PING_RATE_LIMIT', '4'))  # max requests
+    PING_RATE_WINDOW = float(os.environ.get('PING_RATE_WINDOW', '10'))  # seconds window
+except Exception:
+    PING_RATE_LIMIT = 4
+    PING_RATE_WINDOW = 10.0
+
+# Simple file-based cache directory to share ping results across gunicorn workers
+PING_CACHE_DIR = os.environ.get('PING_CACHE_DIR', '/run/wakeonlan/ping_cache')
+try:
+    os.makedirs(PING_CACHE_DIR, exist_ok=True)
+except Exception:
+    # fallback to /tmp if /run not writable
+    PING_CACHE_DIR = '/tmp/wakeonlan_ping_cache'
+    try:
+        os.makedirs(PING_CACHE_DIR, exist_ok=True)
+    except Exception:
+        PING_CACHE_DIR = None
+
+import tempfile
+
+def _safe_ip_filename(ip):
+    # replace chars not safe for filenames
+    return ip.replace(':', '_').replace('/', '_').replace('.', '_')
+
+def read_ping_cache_file(ip):
+    if not PING_CACHE_DIR:
+        return None
+    fn = os.path.join(PING_CACHE_DIR, _safe_ip_filename(ip) + '.json')
+    try:
+        with open(fn, 'r') as f:
+            data = json.load(f)
+        return data
+    except Exception:
+        return None
+
+def write_ping_cache_file(ip, online, ts):
+    if not PING_CACHE_DIR:
+        return
+    fn = os.path.join(PING_CACHE_DIR, _safe_ip_filename(ip) + '.json')
+    tmpfd, tmpname = tempfile.mkstemp(dir=PING_CACHE_DIR)
+    try:
+        with os.fdopen(tmpfd, 'w') as tf:
+            json.dump({'ts': ts, 'online': bool(online)}, tf)
+        os.replace(tmpname, fn)
+    except Exception:
+        try:
+            if os.path.exists(tmpname):
+                os.remove(tmpname)
+        except Exception:
+            pass
+
 @app.route('/api/wol', methods=['POST'])
 def api_wol():
     data = request.get_json(silent=True) or {}
@@ -303,8 +369,64 @@ def api_wol():
 
 @app.route('/api/ping/<ip>')
 def api_ping(ip):
+    # Prefer X-Forwarded-For when behind a reverse proxy (nginx). Take first value if multiple.
+    xff = request.headers.get('X-Forwarded-For', '')
+    if xff:
+        client_ip = xff.split(',')[0].strip()
+    else:
+        client_ip = request.remote_addr or 'unknown'
+    now = time.time()
+
+    # simple sliding-window rate limit per client IP
+    with PING_RATE_LOCK:
+        arr = PING_RATE_MAP.get(client_ip)
+        if not arr:
+            arr = []
+            PING_RATE_MAP[client_ip] = arr
+        # remove old timestamps
+        while arr and arr[0] < now - PING_RATE_WINDOW:
+            arr.pop(0)
+        if len(arr) >= PING_RATE_LIMIT:
+            # Too many requests in window
+            resp = jsonify({"error": "too many requests", "limit": PING_RATE_LIMIT, "window": PING_RATE_WINDOW})
+            resp.status_code = 429
+            resp.headers['Retry-After'] = str(int(PING_RATE_WINDOW))
+            return resp
+        # record this request
+        arr.append(now)
+
+    # Return cached result if recent to avoid hammering the host when clients poll rapidly
+    now = time.time()
+    # Try file cache first (shared between workers)
+    file_cached = read_ping_cache_file(ip)
+    if file_cached and (now - file_cached.get('ts', 0.0) < PING_CACHE_TTL):
+        logger.debug(f"Ping file-cache HIT for {ip} (client={client_ip}) age={now - file_cached.get('ts', 0.0):.2f}s")
+        resp = jsonify({"ip": ip, "online": file_cached.get('online', False), "cached": True})
+        resp.headers['X-Ping-Cache'] = 'HIT_FILE'
+        return resp
+
+    with PING_CACHE_LOCK:
+        cached = PING_CACHE.get(ip)
+        if cached and (now - cached.get('ts', 0.0) < PING_CACHE_TTL):
+            logger.debug(f"Ping memory-cache HIT for {ip} (client={client_ip}) age={now - cached.get('ts', 0.0):.2f}s")
+            resp = jsonify({"ip": ip, "online": cached.get('online', False), "cached": True})
+            resp.headers['X-Ping-Cache'] = 'HIT_MEM'
+            return resp
+
+    # Not cached or expired: perform actual ping
+    logger.info(f"Ping cache MISS for {ip} — performing ping (client={client_ip})")
     online = ping_host(ip)
-    return jsonify({"ip": ip, "online": online})
+    with PING_CACHE_LOCK:
+        PING_CACHE[ip] = {'ts': now, 'online': online}
+    # also write to file cache
+    try:
+        write_ping_cache_file(ip, online, now)
+    except Exception:
+        pass
+
+    resp = jsonify({"ip": ip, "online": online, "cached": False})
+    resp.headers['X-Ping-Cache'] = 'MISS'
+    return resp
 
 @app.route('/api/service-check')
 def api_service_check():
@@ -444,6 +566,34 @@ def debug_info():
             config_content = f"Error reading file: {str(e)}"
     debug_data["config_content"] = config_content
     return jsonify(debug_data)
+
+@app.route('/debug/ping-stats')
+def debug_ping_stats():
+    allow_debug = os.environ.get('ALLOW_DEBUG', '0') in ('1', 'true', 'True')
+    if not (app.debug or allow_debug):
+        abort(404)
+
+    with PING_CACHE_LOCK:
+        cache_keys = list(PING_CACHE.keys())
+    with PING_RATE_LOCK:
+        rate_summary = {k: len(v) for k, v in PING_RATE_MAP.items()}
+    file_keys = []
+    if PING_CACHE_DIR:
+        try:
+            for fn in os.listdir(PING_CACHE_DIR):
+                if fn.endswith('.json'):
+                    file_keys.append(fn)
+        except Exception:
+            pass
+
+    return jsonify({
+        'ping_cache_ttl': PING_CACHE_TTL,
+        'ping_cache_keys': cache_keys,
+        'ping_file_cache_dir': PING_CACHE_DIR,
+        'ping_file_cache_files': file_keys,
+        'rate_limit': {'limit': PING_RATE_LIMIT, 'window': PING_RATE_WINDOW},
+        'rate_map_counts': rate_summary
+    })
 
 @app.route('/health')
 def health_check():
