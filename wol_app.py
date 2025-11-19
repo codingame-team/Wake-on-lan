@@ -244,6 +244,24 @@ def is_service_up(host, port, timeout=1):
         logger.debug(f"Service check failed for {host}:{port} - {e}")
         return False
 
+def http_service_up(url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT)):
+    """Check a service by performing a lightweight HTTP request (HEAD then GET fallback).
+    Returns True if a 2xx-3xx response is returned, False otherwise.
+    """
+    if not url:
+        return False
+    try:
+        # Prefer HEAD (lighter). Some servers block HEAD so fallback to GET.
+        resp = _http_session.head(url, timeout=timeout, allow_redirects=True)
+        if resp.status_code and resp.status_code < 400:
+            return True
+        # try GET as some servers don't support HEAD
+        resp = _http_session.get(url, timeout=timeout, allow_redirects=True)
+        return bool(resp.status_code and resp.status_code < 400)
+    except RequestException as e:
+        logger.debug(f"HTTP check failed for {url}: {e}")
+        return False
+
 def parse_host_port_from_url(url):
     parsed = urlparse(url)
     host = parsed.hostname
@@ -313,27 +331,51 @@ def api_machines():
 
 @app.route('/')
 def gamearena_redirect():
-    # 1) Vérifier si le service GAMEARENA_URL est joignable (préférence TCP)
-    host, _ = parse_host_port_from_url(GAMEARENA_URL)
-    # si GAMEARENA_HOST_IP est défini, l'utiliser pour les checks locaux
+    # Determine host/port/url to check
+    host = None
+    port = None
+    try:
+        if GAMEARENA_URL:
+            host, url_port = parse_host_port_from_url(GAMEARENA_URL)
+            # prefer explicit GAMEARENA_PORT if set
+            port = GAMEARENA_PORT if GAMEARENA_PORT is not None else url_port
+        else:
+            host = GAMEARENA_HOST_IP
+            port = GAMEARENA_PORT
+    except Exception:
+        host = GAMEARENA_HOST_IP or None
+        port = GAMEARENA_PORT
+
+    # If GAMEARENA_HOST_IP is provided, prefer checking the internal address (avoids hairpin/NAT issues)
     check_host = GAMEARENA_HOST_IP or host
-    port = GAMEARENA_PORT
 
-    # Vérifier d'abord si le PC est allumé (ping)
-    pc_online = ping_host(check_host)
-    service_ready = is_service_up(check_host, port, timeout=1)
+    # Build a URL to check via HTTP. Prefer the internal address to avoid NAT/hairpin issues.
+    check_url = None
+    if GAMEARENA_HOST_IP and port:
+        # use http scheme by default; user may run on another scheme/port but this is a pragmatic check
+        check_url = f"http://{GAMEARENA_HOST_IP}:{port}/"
+    elif GAMEARENA_URL:
+        check_url = GAMEARENA_URL
 
-    logger.debug(f"host={host}, port={port}, check_host={check_host}")
-    logger.debug(f"pc_online={pc_online}, service_ready={service_ready}")
-    logger.debug(f"GAMEARENA_URL={GAMEARENA_URL}")
+    # 1) Prefer an HTTP check (more accurate for web services). If HTTP check passes -> redirect to GAMEARENA_URL
+    service_ready = False
+    if check_url:
+        service_ready = http_service_up(check_url, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+        logger.debug(f"HTTP check_url={check_url} result={service_ready}")
+
+    # 2) Fallback: if HTTP check failed, try a low-level TCP connect to check_host:port
+    if not service_ready and check_host and port is not None:
+        service_ready = is_service_up(check_host, port, timeout=1)
+        logger.debug(f"TCP check {check_host}:{port} result={service_ready}")
+
+    logger.debug(f"host={host}, port={port}, check_host={check_host}, GAMEARENA_URL={GAMEARENA_URL}")
+    logger.debug(f"service_ready={service_ready}")
 
     if service_ready:
-        logger.debug(f"Redirecting to {GAMEARENA_URL} (service ready)")
-        return redirect(GAMEARENA_URL)
-
-    if pc_online:
-        logger.debug(f"Redirecting to {GAMEARENA_URL} (PC online)")
-        return redirect(GAMEARENA_URL)
+        # Redirect to the public GAMEARENA_URL if available, otherwise build a local http URL
+        redirect_target = GAMEARENA_URL or (f"http://{check_host}:{port}/" if check_host and port else '/')
+        logger.info(f"Redirecting to {redirect_target} (service ready)")
+        return redirect(redirect_target)
 
     # 2) Service non joignable -> tenter le Wake-on-LAN via la Freebox
     config = load_config()
